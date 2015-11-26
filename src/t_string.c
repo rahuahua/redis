@@ -90,6 +90,21 @@ void setGenericCommand(redisClient *c, int flags, robj *key, robj *val, robj *ex
     addReply(c, ok_reply ? ok_reply : shared.ok);
 }
 
+void setrefGenericCommand(redisClient *c, robj *key, robj *ref_key, robj *ok_reply) {
+    robj * refo;
+    // 检查被引用的Key是否任然在内存中有效
+    if ((refo = lookupKeyReadOrReply(c,ref_key,shared.czero)) == NULL)
+        return;
+
+    ref_key->type = REDIS_REF;
+    setKey(c->db, key, ref_key);
+    server.dirty++;
+
+    notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"setref",key,c->db->id);
+
+    addReply(c, ok_reply ? ok_reply : shared.cone);
+}
+
 /* SET key value [NX] [XX] [EX <seconds>] [PX <milliseconds>] */
 void setCommand(redisClient *c) {
     int j;
@@ -127,6 +142,11 @@ void setCommand(redisClient *c) {
     setGenericCommand(c,flags,c->argv[1],c->argv[2],expire,unit,NULL,NULL);
 }
 
+void setrefCommand(redisClient *c) {
+    c->argv[2] = tryObjectEncoding(c->argv[2]);
+    setrefGenericCommand(c,c->argv[1],c->argv[2],NULL);
+}
+
 void setnxCommand(redisClient *c) {
     c->argv[2] = tryObjectEncoding(c->argv[2]);
     setGenericCommand(c,REDIS_SET_NX,c->argv[1],c->argv[2],NULL,0,shared.cone,shared.czero);
@@ -148,7 +168,22 @@ int getGenericCommand(redisClient *c) {
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.nullbulk)) == NULL)
         return REDIS_OK;
 
-    if (o->type != REDIS_STRING) {
+    if (o->type == REDIS_REF) {
+        robj *ref_key = dupStringObject(o);
+        if ((o = lookupKeyReadOrReply(c,ref_key,shared.nullbulk)) == NULL) {
+            // delete ref key
+            if (dbDelete(c->db,c->argv[1])) {
+                signalModifiedKey(c->db,c->argv[1]);
+                notifyKeyspaceEvent(REDIS_NOTIFY_GENERIC,
+                                    "del",c->argv[1],c->db->id);
+                server.dirty++;
+            }
+        } else {
+            addReplyBulk(c,o);
+        }
+        decrRefCount(ref_key);
+        return REDIS_OK;
+    } else if (o->type != REDIS_STRING) {
         addReply(c,shared.wrongtypeerr);
         return REDIS_ERR;
     } else {

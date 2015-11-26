@@ -432,6 +432,8 @@ int rdbSaveObjectType(rio *rdb, robj *o) {
     switch (o->type) {
     case REDIS_STRING:
         return rdbSaveType(rdb,REDIS_RDB_TYPE_STRING);
+    case REDIS_REF:
+        return rdbSaveType(rdb,REDIS_RDB_TYPE_REF);
     case REDIS_LIST:
         if (o->encoding == REDIS_ENCODING_ZIPLIST)
             return rdbSaveType(rdb,REDIS_RDB_TYPE_LIST_ZIPLIST);
@@ -479,7 +481,7 @@ int rdbLoadObjectType(rio *rdb) {
 int rdbSaveObject(rio *rdb, robj *o) {
     int n, nwritten = 0;
 
-    if (o->type == REDIS_STRING) {
+    if (o->type == REDIS_STRING || o->type == REDIS_REF) {
         /* Save a string value */
         if ((n = rdbSaveStringObject(rdb,o)) == -1) return -1;
         nwritten += n;
@@ -827,6 +829,10 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
         /* Read string value */
         if ((o = rdbLoadEncodedStringObject(rdb)) == NULL) return NULL;
         o = tryObjectEncoding(o);
+    } else if (rdbtype == REDIS_RDB_TYPE_REF) {
+        if ((o = rdbLoadEncodedStringObject(rdb)) == NULL) return NULL;
+        o = tryObjectEncoding(o);
+        o->type = REDIS_REF;
     } else if (rdbtype == REDIS_RDB_TYPE_LIST) {
         /* Read list value */
         if ((len = rdbLoadLen(rdb,NULL)) == REDIS_RDB_LENERR) return NULL;

@@ -162,7 +162,7 @@ robj *createStringObjectFromLongDouble(long double value, int humanfriendly) {
 robj *dupStringObject(robj *o) {
     robj *d;
 
-    redisAssert(o->type == REDIS_STRING);
+    redisAssert(o->type == REDIS_STRING || REDIS_REF);
 
     switch(o->encoding) {
     case REDIS_ENCODING_RAW:
@@ -306,6 +306,7 @@ void decrRefCount(robj *o) {
     if (o->refcount == 1) {
         switch(o->type) {
         case REDIS_STRING: freeStringObject(o); break;
+        case REDIS_REF: freeStringObject(o); break;
         case REDIS_LIST: freeListObject(o); break;
         case REDIS_SET: freeSetObject(o); break;
         case REDIS_ZSET: freeZsetObject(o); break;
@@ -370,7 +371,7 @@ robj *tryObjectEncoding(robj *o) {
      * in this function. Other types use encoded memory efficient
      * representations but are handled by the commands implementing
      * the type. */
-    redisAssertWithInfo(NULL,o,o->type == REDIS_STRING);
+    redisAssertWithInfo(NULL,o,o->type == REDIS_STRING || o->type == REDIS_REF);
 
     /* We try some specialized encoding only for objects that are
      * RAW or EMBSTR encoded, in other words objects that are still

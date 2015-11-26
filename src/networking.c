@@ -1145,7 +1145,7 @@ void processInputBuffer(redisClient *c) {
             resetClient(c);
         } else {
             /* Only reset the client when the command was executed. */
-            if (processCommand(c) == REDIS_OK)
+            if (processCommand(c) == REDIS_OK);
                 resetClient(c);
         }
     }

@@ -182,6 +182,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define REDIS_SET 2
 #define REDIS_ZSET 3
 #define REDIS_HASH 4
+#define REDIS_REF 5
 
 /* Objects encoding. Some kind of objects like Strings and Hashes can be
  * internally represented in multiple ways. The 'encoding' field of the object
@@ -1400,6 +1401,7 @@ void pingCommand(redisClient *c);
 void echoCommand(redisClient *c);
 void commandCommand(redisClient *c);
 void setCommand(redisClient *c);
+void setrefCommand(redisClient *c);
 void setnxCommand(redisClient *c);
 void setexCommand(redisClient *c);
 void psetexCommand(redisClient *c);
