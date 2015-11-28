@@ -268,6 +268,8 @@ void dbRemoveOneRefedKey(redisDb *db, robj *key, robj *refed_key) {
 
     key = tryObjectEncoding(key);
     setTypeRemove(set,key);
+    if (setTypeSize(set) == 0)
+        dictDelete(db->refed_keys,refed_key->ptr);
 }
 
 /* remove all referenced data */
@@ -285,7 +287,7 @@ void removeRefedKeyIfNeed(redisDb *db, robj *ref_key) {
             /* need delete referenced key */
             expireIfNeeded(db, ref_key);
             if (dictSize(db->expires) > 0) dictDelete(db->expires,ref_key->ptr);
-            if (dictDelete(db->dict,ref_key) == DICT_OK && server.cluster_enabled)
+            if (dictDelete(db->dict,ref_key->ptr) == DICT_OK && server.cluster_enabled)
                 slotToKeyDel(ref_key);
         }
     }
@@ -294,7 +296,7 @@ void removeRefedKeyIfNeed(redisDb *db, robj *ref_key) {
     while((set_ele=setTypeNextObject(si)) != NULL) {
         expireIfNeeded(db,set_ele);
         if (dictSize(db->expires) > 0) dictDelete(db->expires,set_ele->ptr);
-        if (dictDelete(db->dict,set_ele) == DICT_OK && server.cluster_enabled)
+        if (dictDelete(db->dict,set_ele->ptr) == DICT_OK && server.cluster_enabled)
             slotToKeyDel(set_ele);
         decrRefCount(set_ele);
     }

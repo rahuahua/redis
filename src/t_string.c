@@ -131,7 +131,7 @@ void setrefCommand(redisClient *c) {
     robj * refo, *val;
     c->argv[2] = tryObjectEncoding(c->argv[2]);
 
-    if ((refo = lookupKeyReadOrReply(c,c->argv[2],shared.czero)) == NULL)
+    if ((refo = lookupKeyWriteOrReply(c,c->argv[2],shared.czero)) == NULL)
         return;
     /* forbid double reference */
     if (refo->type == REDIS_REF) {
