@@ -432,8 +432,6 @@ int rdbSaveObjectType(rio *rdb, robj *o) {
     switch (o->type) {
     case REDIS_STRING:
         return rdbSaveType(rdb,REDIS_RDB_TYPE_STRING);
-    case REDIS_REF:
-        return rdbSaveType(rdb,REDIS_RDB_TYPE_REF);
     case REDIS_LIST:
         if (o->encoding == REDIS_ENCODING_ZIPLIST)
             return rdbSaveType(rdb,REDIS_RDB_TYPE_LIST_ZIPLIST);
@@ -614,6 +612,9 @@ off_t rdbSavedObjectLen(robj *o) {
 int rdbSaveKeyValuePair(rio *rdb, robj *key, robj *val,
                         long long expiretime, long long now)
 {
+    /* if this key's == REDIS_REF, skip it, redis will restore it from db->refed_keys*/
+    if (val->type == REDIS_REF)
+        return 0;
     /* Save the expire time */
     if (expiretime != -1) {
         /* If this key is already expired skip it */
@@ -623,6 +624,25 @@ int rdbSaveKeyValuePair(rio *rdb, robj *key, robj *val,
     }
 
     /* Save type, key, value */
+    if (rdbSaveObjectType(rdb,val) == -1) return -1;
+    if (rdbSaveStringObject(rdb,key) == -1) return -1;
+    if (rdbSaveObject(rdb,val) == -1) return -1;
+    return 1;
+}
+
+int rdbSaveRefedKeyValuePair(rio *rdb, robj *key, robj *val,
+                        long long expiretime, long long now)
+{
+    /* Save the expire time */
+    if (expiretime != -1) {
+        /* If this key is already expired skip it */
+        if (expiretime < now) return 0;
+        if (rdbSaveType(rdb,REDIS_RDB_OPCODE_EXPIRETIME_MS) == -1) return -1;
+        if (rdbSaveMillisecondTime(rdb,expiretime) == -1) return -1;
+    }
+
+    /* Save type, key, value */
+    /* Duplicated save same key in rdb, in rdb restore, the second key MUST be the referenced data */
     if (rdbSaveObjectType(rdb,val) == -1) return -1;
     if (rdbSaveStringObject(rdb,key) == -1) return -1;
     if (rdbSaveObject(rdb,val) == -1) return -1;
@@ -664,12 +684,21 @@ int rdbSaveRio(rio *rdb, int *error) {
         /* Iterate this DB writing every entry */
         while((de = dictNext(di)) != NULL) {
             sds keystr = dictGetKey(de);
-            robj key, *o = dictGetVal(de);
+            robj key, *refed_set, *o = dictGetVal(de);
             long long expire;
+            int saved;
 
             initStaticStringObject(key,keystr);
             expire = getExpire(db,&key);
-            if (rdbSaveKeyValuePair(rdb,&key,o,expire,now) == -1) goto werr;
+            if ((saved=rdbSaveKeyValuePair(rdb,&key,o,expire,now)) == -1) goto werr;
+
+            /* save referenced key data */
+            if (!saved)
+                continue;
+            refed_set = lookupRefedKey(db,&key);
+            if (!refed_set)
+                 continue;
+            if (rdbSaveRefedKeyValuePair(rdb,&key,refed_set,expire,now) == -1) goto werr;
         }
         dictReleaseIterator(di);
     }
@@ -829,10 +858,6 @@ robj *rdbLoadObject(int rdbtype, rio *rdb) {
         /* Read string value */
         if ((o = rdbLoadEncodedStringObject(rdb)) == NULL) return NULL;
         o = tryObjectEncoding(o);
-    } else if (rdbtype == REDIS_RDB_TYPE_REF) {
-        if ((o = rdbLoadEncodedStringObject(rdb)) == NULL) return NULL;
-        o = tryObjectEncoding(o);
-        o->type = REDIS_REF;
     } else if (rdbtype == REDIS_RDB_TYPE_LIST) {
         /* Read list value */
         if ((len = rdbLoadLen(rdb,NULL)) == REDIS_RDB_LENERR) return NULL;
@@ -1164,7 +1189,9 @@ int rdbLoad(char *filename) {
 
     startLoading(fp);
     while(1) {
-        robj *key, *val;
+        robj *key, *val, *set_ele;
+        setTypeIterator *si;
+
         expiretime = -1;
 
         /* Read type. */
@@ -1212,11 +1239,30 @@ int rdbLoad(char *filename) {
             decrRefCount(val);
             continue;
         }
-        /* Add the new object in the hash table */
-        dbAdd(db,key,val);
+        /* Add the new object in the hash table .
+         * Check this key is referenced data or not
+         * */
+        if (!lookupKeyWrite(db, key)) {
+            dbAdd(db,key,val);
+            /* Set the expire time if needed */
+            if (expiretime != -1) setExpire(db,key,expiretime);
+        } else {
+            /* this is referenced data */
+            robj *refed_val = dupStringObject(key);
+            refed_val->type = REDIS_REF;
+            redisAssert(val->type==REDIS_SET);
+            dictAdd(db->refed_keys,sdsdup(key->ptr),val);
 
-        /* Set the expire time if needed */
-        if (expiretime != -1) setExpire(db,key,expiretime);
+            si = setTypeInitIterator(val);
+            while((set_ele = setTypeNextObject(si)) != NULL) {
+                redisAssert(set_ele->type == REDIS_STRING);
+                incrRefCount(refed_val);
+                dbAdd(db,set_ele,refed_val);
+                decrRefCount(set_ele);
+            }
+            setTypeReleaseIterator(si);
+            decrRefCount(refed_val);
+        }
 
         decrRefCount(key);
     }

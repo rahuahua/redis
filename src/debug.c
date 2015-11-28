@@ -286,7 +286,7 @@ void debugCommand(redisClient *c) {
     } else if (!strcasecmp(c->argv[1]->ptr,"object") && c->argc == 3) {
         dictEntry *de;
         robj *val;
-        char *strenc;
+        char *strenc, *strtype;
 
         if ((de = dictFind(c->db->dict,c->argv[2]->ptr)) == NULL) {
             addReply(c,shared.nokeyerr);
@@ -294,14 +294,34 @@ void debugCommand(redisClient *c) {
         }
         val = dictGetVal(de);
         strenc = strEncoding(val->encoding);
+        strtype = strType(val->type);
 
         addReplyStatusFormat(c,
             "Value at:%p refcount:%d "
-            "encoding:%s serializedlength:%lld "
+            "type:%s encoding:%s serializedlength:%lld "
             "lru:%d lru_seconds_idle:%llu",
             (void*)val, val->refcount,
-            strenc, (long long) rdbSavedObjectLen(val),
+            strtype, strenc, (long long) rdbSavedObjectLen(val),
             val->lru, estimateObjectIdleTime(val)/1000);
+    } else if (!strcasecmp(c->argv[1]->ptr,"ref") && c->argc == 3) {
+        robj* set = lookupRefedKey(c->db,c->argv[2]);
+        setTypeIterator *si;
+        sds report;
+        robj *set_ele;
+        if (!set) {
+            addReplyErrorFormat(c, "key '%s' not referenced key",(char*)c->argv[2]->ptr);
+            return;
+        }
+        redisAssert(set->type==REDIS_SET);
+        report = sdscatprintf(sdsempty(), "key '%s' referenecd by ", (char*)c->argv[2]->ptr);
+
+        si = setTypeInitIterator(set);
+        while ((set_ele=setTypeNextObject(si)) != NULL) {
+            redisAssert(set_ele->type==REDIS_STRING);
+            report = sdscatprintf(report, "%s, ", (char*)set_ele->ptr);
+        }
+        addReplyBulkCString(c,report);
+        return;
     } else if (!strcasecmp(c->argv[1]->ptr,"sdslen") && c->argc == 3) {
         dictEntry *de;
         robj *val;

@@ -162,7 +162,7 @@ robj *createStringObjectFromLongDouble(long double value, int humanfriendly) {
 robj *dupStringObject(robj *o) {
     robj *d;
 
-    redisAssert(o->type == REDIS_STRING || REDIS_REF);
+    redisAssert(o->type == REDIS_STRING || o->type == REDIS_REF);
 
     switch(o->encoding) {
     case REDIS_ENCODING_RAW:
@@ -685,6 +685,18 @@ char *strEncoding(int encoding) {
     case REDIS_ENCODING_SKIPLIST: return "skiplist";
     case REDIS_ENCODING_EMBSTR: return "embstr";
     default: return "unknown";
+    }
+}
+
+char *strType(int type) {
+    switch(type) {
+        case REDIS_STRING: return "string";
+        case REDIS_LIST: return "list";
+        case REDIS_HASH: return "hashtable";
+        case REDIS_SET: return "set";
+        case REDIS_ZSET: return "sortedset";
+        case REDIS_REF: return "ref";
+        default: return "unknown";
     }
 }
 

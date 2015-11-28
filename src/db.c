@@ -116,13 +116,21 @@ void dbOverwrite(redisDb *db, robj *key, robj *val) {
  *
  * 1) The ref count of the value object is incremented.
  * 2) clients WATCHing for the destination key notified.
- * 3) The expire time of the key is reset (the key is made persistent). */
+ * 3) The expire time of the key is reset (the key is made persistent).
+ *
+ * check val is referenced value or not
+ * */
 void setKey(redisDb *db, robj *key, robj *val) {
-    if (lookupKeyWrite(db,key) == NULL) {
+    robj *old_val;
+    if ((old_val=lookupKeyWrite(db,key)) == NULL) {
         dbAdd(db,key,val);
     } else {
+        if (old_val->type == REDIS_REF)
+            dbRemoveOneRefedKey(db, key, old_val);
+
         dbOverwrite(db,key,val);
     }
+
     incrRefCount(val);
     removeExpire(db,key);
     signalModifiedKey(db,key);
@@ -162,6 +170,7 @@ robj *dbRandomKey(redisDb *db) {
 int dbDelete(redisDb *db, robj *key) {
     /* Deleting an entry from the expires dict will not free the sds of
      * the key, because it is shared with the main dictionary. */
+    removeRefedKeyIfNeed(db,key);
     if (dictSize(db->expires) > 0) dictDelete(db->expires,key->ptr);
     if (dictDelete(db->dict,key->ptr) == DICT_OK) {
         if (server.cluster_enabled) slotToKeyDel(key);
@@ -217,6 +226,7 @@ long long emptyDb(void(callback)(void*)) {
         removed += dictSize(server.db[j].dict);
         dictEmpty(server.db[j].dict,callback);
         dictEmpty(server.db[j].expires,callback);
+        dictEmpty(server.db[j].refed_keys,callback);
     }
     if (server.cluster_enabled) slotToKeyFlush();
     return removed;
@@ -227,6 +237,69 @@ int selectDb(redisClient *c, int id) {
         return REDIS_ERR;
     c->db = &server.db[id];
     return REDIS_OK;
+}
+
+robj *lookupRefedKey(redisDb *db, robj *key) {
+    dictEntry *de = dictFind(db->refed_keys,key->ptr);
+    if (!de)
+        return NULL;
+
+    robj *val = dictGetVal(de);
+
+    redisAssertWithInfo(NULL, val, val->type == REDIS_SET);
+
+    return val;
+}
+
+void dbAddRefedKey(redisDb *db, robj *key, robj *refed_key) {
+    robj *set = lookupRefedKey(db, refed_key);
+    if (!set) {
+        set = setTypeCreate(key);
+        dictAdd(db->refed_keys,sdsdup(refed_key->ptr),set);
+    }
+    key = tryObjectEncoding(key);
+    setTypeAdd(set,key);
+}
+
+/* remove one reference key */
+void dbRemoveOneRefedKey(redisDb *db, robj *key, robj *refed_key) {
+    robj *set = lookupRefedKey(db, refed_key);
+    if (!set) redisPanic("No valid referenced key found");
+
+    key = tryObjectEncoding(key);
+    setTypeRemove(set,key);
+}
+
+/* remove all referenced data */
+void removeRefedKeyIfNeed(redisDb *db, robj *ref_key) {
+    robj *set_ele, *set;
+    setTypeIterator *si;
+
+    if ((set=lookupRefedKey(db, ref_key)) == NULL) {
+        ref_key = lookupKey(db, ref_key);
+        if (!ref_key || ref_key->type != REDIS_REF)
+            return;
+        else {
+            if ((set=lookupRefedKey(db, ref_key)) == NULL)
+                return;
+            /* need delete referenced key */
+            expireIfNeeded(db, ref_key);
+            if (dictSize(db->expires) > 0) dictDelete(db->expires,ref_key->ptr);
+            if (dictDelete(db->dict,ref_key) == DICT_OK && server.cluster_enabled)
+                slotToKeyDel(ref_key);
+        }
+    }
+
+    si = setTypeInitIterator(set);
+    while((set_ele=setTypeNextObject(si)) != NULL) {
+        expireIfNeeded(db,set_ele);
+        if (dictSize(db->expires) > 0) dictDelete(db->expires,set_ele->ptr);
+        if (dictDelete(db->dict,set_ele) == DICT_OK && server.cluster_enabled)
+            slotToKeyDel(set_ele);
+        decrRefCount(set_ele);
+    }
+    setTypeReleaseIterator(si);
+    dictDelete(db->refed_keys,ref_key->ptr);
 }
 
 /*-----------------------------------------------------------------------------
@@ -255,6 +328,7 @@ void flushdbCommand(redisClient *c) {
     signalFlushedDb(c->db->id);
     dictEmpty(c->db->dict,NULL);
     dictEmpty(c->db->expires,NULL);
+    dictEmpty(c->db->refed_keys,NULL);
     if (server.cluster_enabled) slotToKeyFlush();
     addReply(c,shared.ok);
 }
@@ -875,6 +949,7 @@ int expireIfNeeded(redisDb *db, robj *key) {
 void expireGenericCommand(redisClient *c, long long basetime, int unit) {
     robj *key = c->argv[1], *param = c->argv[2];
     long long when; /* unix time in milliseconds when the key will expire. */
+    robj *refo;
 
     if (getLongLongFromObjectOrReply(c, param, &when, NULL) != REDIS_OK)
         return;
@@ -886,6 +961,12 @@ void expireGenericCommand(redisClient *c, long long basetime, int unit) {
     if (lookupKeyRead(c->db,key) == NULL) {
         addReply(c,shared.czero);
         return;
+    }
+
+    /* check reference */
+    if ((refo = lookupKeyWrite(c->db, key)) != NULL) {
+        redisAssert(refo->type != REDIS_REF);
+        key = refo;
     }
 
     /* EXPIRE with negative TTL, or EXPIREAT with a timestamp into the past
@@ -907,6 +988,8 @@ void expireGenericCommand(redisClient *c, long long basetime, int unit) {
         signalModifiedKey(c->db,key);
         notifyKeyspaceEvent(REDIS_NOTIFY_GENERIC,"del",key,c->db->id);
         addReply(c, shared.cone);
+        if (refo)
+            decrRefCount(key);
         return;
     } else {
         setExpire(c->db,key,when);
@@ -914,6 +997,8 @@ void expireGenericCommand(redisClient *c, long long basetime, int unit) {
         signalModifiedKey(c->db,key);
         notifyKeyspaceEvent(REDIS_NOTIFY_GENERIC,"expire",key,c->db->id);
         server.dirty++;
+        if (refo)
+            decrRefCount(key);
         return;
     }
 }

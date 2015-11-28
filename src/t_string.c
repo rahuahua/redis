@@ -90,21 +90,6 @@ void setGenericCommand(redisClient *c, int flags, robj *key, robj *val, robj *ex
     addReply(c, ok_reply ? ok_reply : shared.ok);
 }
 
-void setrefGenericCommand(redisClient *c, robj *key, robj *ref_key, robj *ok_reply) {
-    robj * refo;
-    // 检查被引用的Key是否任然在内存中有效
-    if ((refo = lookupKeyReadOrReply(c,ref_key,shared.czero)) == NULL)
-        return;
-
-    ref_key->type = REDIS_REF;
-    setKey(c->db, key, ref_key);
-    server.dirty++;
-
-    notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"setref",key,c->db->id);
-
-    addReply(c, ok_reply ? ok_reply : shared.cone);
-}
-
 /* SET key value [NX] [XX] [EX <seconds>] [PX <milliseconds>] */
 void setCommand(redisClient *c) {
     int j;
@@ -143,8 +128,29 @@ void setCommand(redisClient *c) {
 }
 
 void setrefCommand(redisClient *c) {
+    robj * refo, *val;
     c->argv[2] = tryObjectEncoding(c->argv[2]);
-    setrefGenericCommand(c,c->argv[1],c->argv[2],NULL);
+
+    if ((refo = lookupKeyReadOrReply(c,c->argv[2],shared.czero)) == NULL)
+        return;
+    /* forbid double reference */
+    if (refo->type == REDIS_REF) {
+        robj *refrefo;
+        refrefo = lookupKeyWrite(c->db, refo);
+        redisAssert(refo != NULL && refrefo->type != REDIS_REF);
+        val = refo;
+    } else {
+        val = c->argv[2];
+        val->type = REDIS_REF;
+    }
+
+    setKey(c->db,c->argv[1],val);
+    server.dirty++;
+    dbAddRefedKey(c->db,c->argv[1],val);
+
+    notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"setref",c->argv[1],c->db->id);
+
+    addReply(c, shared.cone);
 }
 
 void setnxCommand(redisClient *c) {
