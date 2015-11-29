@@ -125,9 +125,6 @@ void setKey(redisDb *db, robj *key, robj *val) {
     if ((old_val=lookupKeyWrite(db,key)) == NULL) {
         dbAdd(db,key,val);
     } else {
-        if (old_val->type == REDIS_REF)
-            dbRemoveOneRefedKey(db, key, old_val);
-
         dbOverwrite(db,key,val);
     }
 
@@ -278,18 +275,7 @@ void removeRefedKeyIfNeed(redisDb *db, robj *ref_key) {
     setTypeIterator *si;
 
     if ((set=lookupRefedKey(db, ref_key)) == NULL) {
-        ref_key = lookupKey(db, ref_key);
-        if (!ref_key || ref_key->type != REDIS_REF)
-            return;
-        else {
-            if ((set=lookupRefedKey(db, ref_key)) == NULL)
-                return;
-            /* need delete referenced key */
-            expireIfNeeded(db, ref_key);
-            if (dictSize(db->expires) > 0) dictDelete(db->expires,ref_key->ptr);
-            if (dictDelete(db->dict,ref_key->ptr) == DICT_OK && server.cluster_enabled)
-                slotToKeyDel(ref_key);
-        }
+        return;
     }
 
     si = setTypeInitIterator(set);

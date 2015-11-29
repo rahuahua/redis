@@ -119,26 +119,27 @@ struct redisServer server; /* server global state */
  *    its execution as long as the kernel scheduler is giving us time.
  *    Note that commands that may trigger a DEL as a side effect (like SET)
  *    are not fast commands.
+ * C: this command should check key is reference key,
+ *    if is, should replace key with referenced key
  */
 struct redisCommand redisCommandTable[] = {
-    {"get",getCommand,2,"rF",0,NULL,1,1,1,0,0},
+    {"get",getCommand,2,"rFC",0,NULL,1,1,1,0,0},
     {"set",setCommand,-3,"wm",0,NULL,1,1,1,0,0},
     {"setnx",setnxCommand,3,"wmF",0,NULL,1,1,1,0,0},
     {"setex",setexCommand,4,"wm",0,NULL,1,1,1,0,0},
-    {"setref",setrefCommand,3,"wm",0,NULL,1,1,1,0,0},
     {"psetex",psetexCommand,4,"wm",0,NULL,1,1,1,0,0},
-    {"append",appendCommand,3,"wm",0,NULL,1,1,1,0,0},
-    {"strlen",strlenCommand,2,"rF",0,NULL,1,1,1,0,0},
-    {"del",delCommand,-2,"w",0,NULL,1,-1,1,0,0},
+    {"append",appendCommand,3,"wmC",0,NULL,1,1,1,0,0},
+    {"strlen",strlenCommand,2,"rFC",0,NULL,1,1,1,0,0},
+    {"del",delCommand,-2,"wC",0,NULL,1,-1,1,0,0},
     {"exists",existsCommand,-2,"rF",0,NULL,1,-1,1,0,0},
-    {"setbit",setbitCommand,4,"wm",0,NULL,1,1,1,0,0},
-    {"getbit",getbitCommand,3,"rF",0,NULL,1,1,1,0,0},
-    {"setrange",setrangeCommand,4,"wm",0,NULL,1,1,1,0,0},
-    {"getrange",getrangeCommand,4,"r",0,NULL,1,1,1,0,0},
-    {"substr",getrangeCommand,4,"r",0,NULL,1,1,1,0,0},
-    {"incr",incrCommand,2,"wmF",0,NULL,1,1,1,0,0},
-    {"decr",decrCommand,2,"wmF",0,NULL,1,1,1,0,0},
-    {"mget",mgetCommand,-2,"r",0,NULL,1,-1,1,0,0},
+    {"setbit",setbitCommand,4,"wmC",0,NULL,1,1,1,0,0},
+    {"getbit",getbitCommand,3,"rFC",0,NULL,1,1,1,0,0},
+    {"setrange",setrangeCommand,4,"wmC",0,NULL,1,1,1,0,0},
+    {"getrange",getrangeCommand,4,"rC",0,NULL,1,1,1,0,0},
+    {"substr",getrangeCommand,4,"rC",0,NULL,1,1,1,0,0},
+    {"incr",incrCommand,2,"wmFC",0,NULL,1,1,1,0,0},
+    {"decr",decrCommand,2,"wmFC",0,NULL,1,1,1,0,0},
+    {"mget",mgetCommand,-2,"rC",0,NULL,1,-1,1,0,0},
     {"rpush",rpushCommand,-3,"wmF",0,NULL,1,1,1,0,0},
     {"lpush",lpushCommand,-3,"wmF",0,NULL,1,1,1,0,0},
     {"rpushx",rpushxCommand,3,"wmF",0,NULL,1,1,1,0,0},
@@ -217,10 +218,10 @@ struct redisCommand redisCommandTable[] = {
     {"move",moveCommand,3,"wF",0,NULL,1,1,1,0,0},
     {"rename",renameCommand,3,"w",0,NULL,1,2,1,0,0},
     {"renamenx",renamenxCommand,3,"wF",0,NULL,1,2,1,0,0},
-    {"expire",expireCommand,3,"wF",0,NULL,1,1,1,0,0},
-    {"expireat",expireatCommand,3,"wF",0,NULL,1,1,1,0,0},
-    {"pexpire",pexpireCommand,3,"wF",0,NULL,1,1,1,0,0},
-    {"pexpireat",pexpireatCommand,3,"wF",0,NULL,1,1,1,0,0},
+    {"expire",expireCommand,3,"wFC",0,NULL,1,1,1,0,0},
+    {"expireat",expireatCommand,3,"wFC",0,NULL,1,1,1,0,0},
+    {"pexpire",pexpireCommand,3,"wFC",0,NULL,1,1,1,0,0},
+    {"pexpireat",pexpireatCommand,3,"wFC",0,NULL,1,1,1,0,0},
     {"keys",keysCommand,2,"rS",0,NULL,0,0,0,0,0},
     {"scan",scanCommand,-2,"rR",0,NULL,0,0,0,0,0},
     {"dbsize",dbsizeCommand,1,"rF",0,NULL,0,0,0,0,0},
@@ -284,7 +285,9 @@ struct redisCommand redisCommandTable[] = {
     {"pfcount",pfcountCommand,-2,"r",0,NULL,1,-1,1,0,0},
     {"pfmerge",pfmergeCommand,-2,"wm",0,NULL,1,-1,1,0,0},
     {"pfdebug",pfdebugCommand,-3,"w",0,NULL,0,0,0,0,0},
-    {"latency",latencyCommand,-2,"arslt",0,NULL,0,0,0,0,0}
+    {"latency",latencyCommand,-2,"arslt",0,NULL,0,0,0,0,0},
+    {"setref",setrefCommand,3,"wm",0,NULL,1,1,1,0,0},
+    {"delref",delrefCommand,2,"wm",0,NULL,1,1,1,0,0},
 };
 
 struct evictionPoolEntry *evictionPoolAlloc(void);
@@ -1918,6 +1921,7 @@ void populateCommandTable(void) {
             case 'M': c->flags |= REDIS_CMD_SKIP_MONITOR; break;
             case 'k': c->flags |= REDIS_CMD_ASKING; break;
             case 'F': c->flags |= REDIS_CMD_FAST; break;
+            case 'C': c->flags |= REDIS_CMD_CHECKREF; break;
             default: redisPanic("Unsupported command flag"); break;
             }
             f++;
@@ -2054,6 +2058,20 @@ void call(redisClient *c, int flags) {
         !(c->cmd->flags & (REDIS_CMD_SKIP_MONITOR|REDIS_CMD_ADMIN)))
     {
         replicationFeedMonitors(c,server.monitors,c->db->id,c->argv,c->argc);
+    }
+
+    if (c->cmd->flags & REDIS_CMD_CHECKREF) {
+        /* replace referenced key */
+        int *keys, numkeys;
+        robj *refo;
+        keys = getKeysFromCommand(c->cmd,c->argv,c->argc,&numkeys);
+        for (int i=0; i<numkeys; i++) {
+            refo = lookupKey(c->db,c->argv[keys[i]]);
+            if (!refo || refo->type != REDIS_REF) continue;
+            decrRefCount(c->argv[keys[i]]);
+            incrRefCount(refo);
+            c->argv[keys[i]] = refo;
+        }
     }
 
     /* Call the command. */

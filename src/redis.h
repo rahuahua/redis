@@ -175,6 +175,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define REDIS_CMD_SKIP_MONITOR 2048         /* "M" flag */
 #define REDIS_CMD_ASKING 4096               /* "k" flag */
 #define REDIS_CMD_FAST 8192                 /* "F" flag */
+#define REDIS_CMD_CHECKREF 16384            /* "C" flag */
 
 /* Object types */
 #define REDIS_STRING 0
@@ -1409,7 +1410,6 @@ void pingCommand(redisClient *c);
 void echoCommand(redisClient *c);
 void commandCommand(redisClient *c);
 void setCommand(redisClient *c);
-void setrefCommand(redisClient *c);
 void setnxCommand(redisClient *c);
 void setexCommand(redisClient *c);
 void psetexCommand(redisClient *c);
@@ -1563,6 +1563,8 @@ void pfcountCommand(redisClient *c);
 void pfmergeCommand(redisClient *c);
 void pfdebugCommand(redisClient *c);
 void latencyCommand(redisClient *c);
+void setrefCommand(redisClient *c);
+void delrefCommand(redisClient *c);
 
 #if defined(__GNUC__)
 void *calloc(size_t count, size_t size) __attribute__ ((deprecated));

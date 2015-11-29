@@ -313,12 +313,12 @@ void debugCommand(redisClient *c) {
             return;
         }
         redisAssert(set->type==REDIS_SET);
-        report = sdscatprintf(sdsempty(), "key '%s' referenecd by ", (char*)c->argv[2]->ptr);
+        report = sdscatprintf(sdsempty(), "key '%s' referenecd by key ", (char*)c->argv[2]->ptr);
 
         si = setTypeInitIterator(set);
         while ((set_ele=setTypeNextObject(si)) != NULL) {
             redisAssert(set_ele->type==REDIS_STRING);
-            report = sdscatprintf(report, "%s, ", (char*)set_ele->ptr);
+            report = sdscatprintf(report, "'%s' ", (char*)set_ele->ptr);
         }
         addReplyBulkCString(c,report);
         return;

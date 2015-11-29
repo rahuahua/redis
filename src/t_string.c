@@ -128,8 +128,12 @@ void setCommand(redisClient *c) {
 }
 
 void setrefCommand(redisClient *c) {
-    robj * refo, *val;
-    c->argv[2] = tryObjectEncoding(c->argv[2]);
+    robj * refo, *val, *oldval;
+
+    if (lookupRefedKey(c->db,c->argv[1])) {
+        addReplyErrorFormat(c,"%s is already referenced",(char*)c->argv[1]->ptr);
+        return;
+    }
 
     if ((refo = lookupKeyWriteOrReply(c,c->argv[2],shared.czero)) == NULL)
         return;
@@ -142,6 +146,11 @@ void setrefCommand(redisClient *c) {
     } else {
         val = c->argv[2];
         val->type = REDIS_REF;
+        val = tryObjectEncoding(val);
+    }
+
+    if ((oldval=lookupKeyWrite(c->db,c->argv[1])) !=NULL && oldval->type==REDIS_REF) {
+        dbRemoveOneRefedKey(c->db,c->argv[1],oldval);
     }
 
     setKey(c->db,c->argv[1],val);
@@ -149,6 +158,26 @@ void setrefCommand(redisClient *c) {
     dbAddRefedKey(c->db,c->argv[1],val);
 
     notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"setref",c->argv[1],c->db->id);
+
+    addReply(c, shared.cone);
+}
+
+void delrefCommand(redisClient *c) {
+    robj * refo;
+
+    if ((refo = lookupKeyWriteOrReply(c,c->argv[2],shared.czero)) == NULL)
+        return;
+    /* forbid double reference */
+    if (refo->type != REDIS_REF) {
+        addReply(c,shared.wrongtypeerr);
+        return;
+    }
+
+    dbDelete(c->db,c->argv[1]);
+    server.dirty++;
+    dbRemoveOneRefedKey(c->db,c->argv[1],refo);
+
+    notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"delref",c->argv[1],c->db->id);
 
     addReply(c, shared.cone);
 }
@@ -174,22 +203,7 @@ int getGenericCommand(redisClient *c) {
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.nullbulk)) == NULL)
         return REDIS_OK;
 
-    if (o->type == REDIS_REF) {
-        robj *ref_key = dupStringObject(o);
-        if ((o = lookupKeyReadOrReply(c,ref_key,shared.nullbulk)) == NULL) {
-            // delete ref key
-            if (dbDelete(c->db,c->argv[1])) {
-                signalModifiedKey(c->db,c->argv[1]);
-                notifyKeyspaceEvent(REDIS_NOTIFY_GENERIC,
-                                    "del",c->argv[1],c->db->id);
-                server.dirty++;
-            }
-        } else {
-            addReplyBulk(c,o);
-        }
-        decrRefCount(ref_key);
-        return REDIS_OK;
-    } else if (o->type != REDIS_STRING) {
+    if (o->type != REDIS_STRING) {
         addReply(c,shared.wrongtypeerr);
         return REDIS_ERR;
     } else {
