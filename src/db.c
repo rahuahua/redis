@@ -167,7 +167,7 @@ robj *dbRandomKey(redisDb *db) {
 int dbDelete(redisDb *db, robj *key) {
     /* Deleting an entry from the expires dict will not free the sds of
      * the key, because it is shared with the main dictionary. */
-    removeRefedKeyIfNeed(db,key);
+    removeRefKeyIfNeed(db, key);
     if (dictSize(db->expires) > 0) dictDelete(db->expires,key->ptr);
     if (dictDelete(db->dict,key->ptr) == DICT_OK) {
         if (server.cluster_enabled) slotToKeyDel(key);
@@ -236,58 +236,96 @@ int selectDb(redisClient *c, int id) {
     return REDIS_OK;
 }
 
-robj *lookupRefedKey(redisDb *db, robj *key) {
-    dictEntry *de = dictFind(db->refed_keys,key->ptr);
-    if (!de)
+robj *lookupRefKey(redisDb *db, robj *key) {
+    dictEntry *de;
+    robj *val;
+    robj *raw_key = getDecodedObject(key);
+
+    if ((de=dictFind(db->refed_keys,raw_key->ptr)) == NULL) {
+        decrRefCount(raw_key);
         return NULL;
+    }
 
-    robj *val = dictGetVal(de);
-
+    decrRefCount(raw_key);
+    val = dictGetVal(de);
     redisAssertWithInfo(NULL, val, val->type == REDIS_SET);
-
     return val;
 }
 
-void dbAddRefedKey(redisDb *db, robj *key, robj *refed_key) {
-    robj *set = lookupRefedKey(db, refed_key);
+void dbAddRefKey(redisDb *db, robj *key, robj *refed_key) {
+    robj *raw_key = getDecodedObject(refed_key);
+    robj *set = lookupRefKey(db,raw_key);
     if (!set) {
         set = setTypeCreate(key);
-        dictAdd(db->refed_keys,sdsdup(refed_key->ptr),set);
+        dictAdd(db->refed_keys,sdsdup(raw_key->ptr),set);
     }
     key = tryObjectEncoding(key);
     setTypeAdd(set,key);
+    decrRefCount(raw_key);
 }
 
 /* remove one reference key */
-void dbRemoveOneRefedKey(redisDb *db, robj *key, robj *refed_key) {
-    robj *set = lookupRefedKey(db, refed_key);
+void dbRemoveOneRefKey(redisDb *db, robj *key, robj *refed_key) {
+    robj *raw_key = getDecodedObject(refed_key);
+    robj *set = lookupRefKey(db, raw_key);
     if (!set) redisPanic("No valid referenced key found");
 
     key = tryObjectEncoding(key);
     setTypeRemove(set,key);
     if (setTypeSize(set) == 0)
-        dictDelete(db->refed_keys,refed_key->ptr);
+        dictDelete(db->refed_keys,raw_key->ptr);
+    decrRefCount(raw_key);
 }
 
 /* remove all referenced data */
-void removeRefedKeyIfNeed(redisDb *db, robj *ref_key) {
-    robj *set_ele, *set;
+void removeRefKeyIfNeed(redisDb *db, robj *ref_key) {
+    robj *set_ele, *set, *raw_key = getDecodedObject(ref_key);
     setTypeIterator *si;
 
-    if ((set=lookupRefedKey(db, ref_key)) == NULL) {
+    if ((set= lookupRefKey(db,raw_key)) == NULL) {
+        decrRefCount(raw_key);
         return;
     }
 
     si = setTypeInitIterator(set);
     while((set_ele=setTypeNextObject(si)) != NULL) {
-        expireIfNeeded(db,set_ele);
-        if (dictSize(db->expires) > 0) dictDelete(db->expires,set_ele->ptr);
-        if (dictDelete(db->dict,set_ele->ptr) == DICT_OK && server.cluster_enabled)
-            slotToKeyDel(set_ele);
+        robj *ele_raw_key = getDecodedObject(set_ele);
+        if (dictDelete(db->dict,ele_raw_key->ptr) == DICT_OK && server.cluster_enabled)
+            slotToKeyDel(ele_raw_key);
         decrRefCount(set_ele);
+        decrRefCount(ele_raw_key);
     }
     setTypeReleaseIterator(si);
-    dictDelete(db->refed_keys,ref_key->ptr);
+    dictDelete(db->refed_keys,raw_key->ptr);
+    decrRefCount(raw_key);
+}
+
+robj **getRefKeys(redisDb *db, robj *ref_key, unsigned long *num) {
+    robj *raw_key = getDecodedObject(ref_key);
+    robj *set = lookupRefKey(db,raw_key);
+    robj **res;
+    setTypeIterator *si;
+    robj *set_ele;
+    unsigned long ix = 0;
+
+    if (!set) {
+        *num = 0;
+        return NULL;
+    }
+
+    res = zmalloc(sizeof(robj*)*setTypeSize(set));
+
+    si = setTypeInitIterator(set);
+    while ((set_ele=setTypeNextObject(si)) != NULL) {
+        robj *raw = getDecodedObject(set_ele);
+        res[ix] = raw;
+        decrRefCount(set_ele);
+        ix++;
+    }
+    setTypeReleaseIterator(si);
+
+    *num = ix;
+    return res;
 }
 
 /*-----------------------------------------------------------------------------

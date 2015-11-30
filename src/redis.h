@@ -1360,10 +1360,11 @@ void scanGenericCommand(redisClient *c, robj *o, unsigned long cursor);
 int parseScanCursorOrReply(redisClient *c, robj *o, unsigned long *cursor);
 
 /* for reference key */
-robj *lookupRefedKey(redisDb *db, robj *key);
-void dbAddRefedKey(redisDb *db, robj *key, robj *refed_key);
-void dbRemoveOneRefedKey(redisDb *db, robj *key, robj *refed_key);
-void removeRefedKeyIfNeed(redisDb *db, robj *refed_key);
+robj *lookupRefKey(redisDb *db, robj *key);
+void dbAddRefKey(redisDb *db, robj *key, robj *refed_key);
+void dbRemoveOneRefKey(redisDb *db, robj *key, robj *refed_key);
+void removeRefKeyIfNeed(redisDb *db, robj *refed_key);
+robj **getRefKeys(redisDb *db, robj *ref_key, unsigned long *num);
 
 /* API to get key arguments from commands */
 int *getKeysFromCommand(struct redisCommand *cmd, robj **argv, int argc, int *numkeys);

@@ -450,7 +450,7 @@ robj *getDecodedObject(robj *o) {
         incrRefCount(o);
         return o;
     }
-    if (o->type == REDIS_STRING && o->encoding == REDIS_ENCODING_INT) {
+    if ((o->type == REDIS_STRING || o->type == REDIS_REF) && o->encoding == REDIS_ENCODING_INT) {
         char buf[32];
 
         ll2string(buf,32,(long)o->ptr);

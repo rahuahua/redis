@@ -304,24 +304,21 @@ void debugCommand(redisClient *c) {
             strtype, strenc, (long long) rdbSavedObjectLen(val),
             val->lru, estimateObjectIdleTime(val)/1000);
     } else if (!strcasecmp(c->argv[1]->ptr,"ref") && c->argc == 3) {
-        robj* set = lookupRefedKey(c->db,c->argv[2]);
-        setTypeIterator *si;
+        unsigned long num_key, ix=0;
+        robj **ref_keys = getRefKeys(c->db,c->argv[2],&num_key);
         sds report;
-        robj *set_ele;
-        if (!set) {
-            addReplyErrorFormat(c, "key '%s' not referenced key",(char*)c->argv[2]->ptr);
+
+        if (num_key == 0) {
+            addReplyErrorFormat(c,"key '%s' not referenced key",(char*)c->argv[2]->ptr);
             return;
         }
-        redisAssert(set->type==REDIS_SET);
-        report = sdscatprintf(sdsempty(), "key '%s' referenecd by key ", (char*)c->argv[2]->ptr);
-
-        si = setTypeInitIterator(set);
-        while ((set_ele=setTypeNextObject(si)) != NULL) {
-            redisAssert(set_ele->type==REDIS_STRING);
-            report = sdscatprintf(report, "'%s' ", (char*)set_ele->ptr);
+        report = sdscatprintf(sdsempty(),"key '%s' referenecd by keys ",(char*)c->argv[2]->ptr);
+        while (ix < num_key) {
+            report = sdscatprintf(report,"'%s' ",(char*)ref_keys[ix]->ptr);
+            decrRefCount(ref_keys[ix]);
+            ix++;
         }
         addReplyBulkCString(c,report);
-        return;
     } else if (!strcasecmp(c->argv[1]->ptr,"sdslen") && c->argc == 3) {
         dictEntry *de;
         robj *val;

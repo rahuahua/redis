@@ -695,7 +695,7 @@ int rdbSaveRio(rio *rdb, int *error) {
             /* save referenced key data */
             if (!saved)
                 continue;
-            refed_set = lookupRefedKey(db,&key);
+            refed_set = lookupRefKey(db, &key);
             if (!refed_set)
                  continue;
             if (rdbSaveRefedKeyValuePair(rdb,&key,refed_set,expire,now) == -1) goto werr;

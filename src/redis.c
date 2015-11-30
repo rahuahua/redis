@@ -2069,8 +2069,7 @@ void call(redisClient *c, int flags) {
             refo = lookupKey(c->db,c->argv[keys[i]]);
             if (!refo || refo->type != REDIS_REF) continue;
             decrRefCount(c->argv[keys[i]]);
-            incrRefCount(refo);
-            c->argv[keys[i]] = refo;
+            c->argv[keys[i]] = getDecodedObject(refo);
         }
     }
 

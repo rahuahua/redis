@@ -130,32 +130,37 @@ void setCommand(redisClient *c) {
 void setrefCommand(redisClient *c) {
     robj * refo, *val, *oldval;
 
-    if (lookupRefedKey(c->db,c->argv[1])) {
+    if (lookupRefKey(c->db,c->argv[1])) {
         addReplyErrorFormat(c,"%s is already referenced",(char*)c->argv[1]->ptr);
         return;
     }
 
-    if ((refo = lookupKeyWriteOrReply(c,c->argv[2],shared.czero)) == NULL)
+    if ((refo=lookupKeyWriteOrReply(c,c->argv[2],shared.czero)) == NULL)
         return;
+
     /* forbid double reference */
     if (refo->type == REDIS_REF) {
-        robj *refrefo;
-        refrefo = lookupKeyWrite(c->db, refo);
+        robj *raw = getDecodedObject(refo);
+        robj *refrefo = lookupKey(c->db,raw);
         redisAssert(refo != NULL && refrefo->type != REDIS_REF);
         val = refo;
+        decrRefCount(raw);
+    } else if (refo->type != REDIS_STRING) {
+        addReply(c,shared.wrongtypeerr);
+        return;
     } else {
+        c->argv[2] = tryObjectEncoding(c->argv[2]);
         val = c->argv[2];
         val->type = REDIS_REF;
-        val = tryObjectEncoding(val);
     }
 
-    if ((oldval=lookupKeyWrite(c->db,c->argv[1])) !=NULL && oldval->type==REDIS_REF) {
-        dbRemoveOneRefedKey(c->db,c->argv[1],oldval);
+    if ((oldval=lookupKeyWrite(c->db,c->argv[1])) != NULL && oldval->type == REDIS_REF) {
+        dbRemoveOneRefKey(c->db,c->argv[1],oldval);
     }
 
     setKey(c->db,c->argv[1],val);
     server.dirty++;
-    dbAddRefedKey(c->db,c->argv[1],val);
+    dbAddRefKey(c->db,c->argv[1],val);
 
     notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"setref",c->argv[1],c->db->id);
 
@@ -165,9 +170,8 @@ void setrefCommand(redisClient *c) {
 void delrefCommand(redisClient *c) {
     robj * refo;
 
-    if ((refo = lookupKeyWriteOrReply(c,c->argv[2],shared.czero)) == NULL)
+    if ((refo = lookupKeyWriteOrReply(c,c->argv[1],shared.czero)) == NULL)
         return;
-    /* forbid double reference */
     if (refo->type != REDIS_REF) {
         addReply(c,shared.wrongtypeerr);
         return;
@@ -175,7 +179,7 @@ void delrefCommand(redisClient *c) {
 
     dbDelete(c->db,c->argv[1]);
     server.dirty++;
-    dbRemoveOneRefedKey(c->db,c->argv[1],refo);
+    dbRemoveOneRefKey(c->db,c->argv[1],refo);
 
     notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"delref",c->argv[1],c->db->id);
 
