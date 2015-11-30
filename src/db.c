@@ -314,7 +314,6 @@ robj **getRefKeys(redisDb *db, robj *ref_key, unsigned long *num) {
     }
 
     res = zmalloc(sizeof(robj*)*setTypeSize(set));
-
     si = setTypeInitIterator(set);
     while ((set_ele=setTypeNextObject(si)) != NULL) {
         robj *raw = getDecodedObject(set_ele);
@@ -776,6 +775,15 @@ void renameGenericCommand(redisClient *c, int nx) {
 
     if ((o = lookupKeyWriteOrReply(c,c->argv[1],shared.nokeyerr)) == NULL)
         return;
+
+    if (o->type == REDIS_REF) {
+        addReplyErrorFormat(c,"%s is a reference key",(char*)c->argv[1]->ptr);
+        return;
+    }
+    if (lookupRefKey(c->db,c->argv[1])) {
+        addReplyErrorFormat(c,"%s is a referenced key",(char*)c->argv[1]->ptr);
+        return;
+    }
 
     incrRefCount(o);
     expire = getExpire(c->db,c->argv[1]);

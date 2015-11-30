@@ -130,6 +130,20 @@ void setCommand(redisClient *c) {
 void setrefCommand(redisClient *c) {
     robj * refo, *val, *oldval;
 
+    if (sdscmp(c->argv[1]->ptr,c->argv[2]->ptr) == 0) {
+        addReply(c,shared.sameobjecterr);
+        return;
+    }
+
+    if (server.cluster_enabled) {
+        unsigned int h1 = keyHashSlot((char*)c->argv[1]->ptr,sdslen(c->argv[1]->ptr));
+        unsigned int h2 = keyHashSlot((char*)c->argv[2]->ptr,sdslen(c->argv[2]->ptr));
+        if (h1 != h2) {
+            addReplyErrorFormat(c,"key slot is not equal");
+            return;
+        }
+    }
+
     if (lookupRefKey(c->db,c->argv[1])) {
         addReplyErrorFormat(c,"%s is already referenced",(char*)c->argv[1]->ptr);
         return;
