@@ -241,7 +241,7 @@ robj *lookupRefKey(redisDb *db, robj *key) {
     robj *val;
     robj *raw_key = getDecodedObject(key);
 
-    if ((de=dictFind(db->refed_keys,raw_key->ptr)) == NULL) {
+    if ((de = dictFind(db->refed_keys,raw_key->ptr)) == NULL) {
         decrRefCount(raw_key);
         return NULL;
     }
@@ -267,7 +267,7 @@ void dbAddRefKey(redisDb *db, robj *key, robj *refed_key) {
 /* remove one reference key */
 void dbRemoveOneRefKey(redisDb *db, robj *key, robj *refed_key) {
     robj *raw_key = getDecodedObject(refed_key);
-    robj *set = lookupRefKey(db, raw_key);
+    robj *set = lookupRefKey(db,raw_key);
     if (!set) redisPanic("No valid referenced key found");
 
     key = tryObjectEncoding(key);
@@ -282,13 +282,13 @@ void removeRefKeyIfNeed(redisDb *db, robj *ref_key) {
     robj *set_ele, *set, *raw_key = getDecodedObject(ref_key);
     setTypeIterator *si;
 
-    if ((set= lookupRefKey(db,raw_key)) == NULL) {
+    if ((set = lookupRefKey(db,raw_key)) == NULL) {
         decrRefCount(raw_key);
         return;
     }
 
     si = setTypeInitIterator(set);
-    while((set_ele=setTypeNextObject(si)) != NULL) {
+    while((set_ele = setTypeNextObject(si)) != NULL) {
         robj *ele_raw_key = getDecodedObject(set_ele);
         if (dictDelete(db->dict,ele_raw_key->ptr) == DICT_OK && server.cluster_enabled)
             slotToKeyDel(ele_raw_key);
