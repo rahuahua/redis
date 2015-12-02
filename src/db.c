@@ -983,7 +983,6 @@ int expireIfNeeded(redisDb *db, robj *key) {
 void expireGenericCommand(redisClient *c, long long basetime, int unit) {
     robj *key = c->argv[1], *param = c->argv[2];
     long long when; /* unix time in milliseconds when the key will expire. */
-    robj *refo;
 
     if (getLongLongFromObjectOrReply(c, param, &when, NULL) != REDIS_OK)
         return;
@@ -995,12 +994,6 @@ void expireGenericCommand(redisClient *c, long long basetime, int unit) {
     if (lookupKeyRead(c->db,key) == NULL) {
         addReply(c,shared.czero);
         return;
-    }
-
-    /* check reference */
-    if ((refo = lookupKeyWrite(c->db, key)) != NULL) {
-        redisAssert(refo->type != REDIS_REF);
-        key = refo;
     }
 
     /* EXPIRE with negative TTL, or EXPIREAT with a timestamp into the past
@@ -1022,8 +1015,6 @@ void expireGenericCommand(redisClient *c, long long basetime, int unit) {
         signalModifiedKey(c->db,key);
         notifyKeyspaceEvent(REDIS_NOTIFY_GENERIC,"del",key,c->db->id);
         addReply(c, shared.cone);
-        if (refo)
-            decrRefCount(key);
         return;
     } else {
         setExpire(c->db,key,when);
@@ -1031,8 +1022,6 @@ void expireGenericCommand(redisClient *c, long long basetime, int unit) {
         signalModifiedKey(c->db,key);
         notifyKeyspaceEvent(REDIS_NOTIFY_GENERIC,"expire",key,c->db->id);
         server.dirty++;
-        if (refo)
-            decrRefCount(key);
         return;
     }
 }
