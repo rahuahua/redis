@@ -2065,12 +2065,13 @@ void call(redisClient *c, int flags) {
         int *keys, numkeys;
         robj *refo;
         keys = getKeysFromCommand(c->cmd,c->argv,c->argc,&numkeys);
-        for (int i=0; i<numkeys; i++) {
+        for (int i = 0; i < numkeys; i++) {
             refo = lookupKey(c->db,c->argv[keys[i]]);
             if (!refo || refo->type != REDIS_REF) continue;
             decrRefCount(c->argv[keys[i]]);
             c->argv[keys[i]] = getDecodedObject(refo);
         }
+        getKeysFreeResult(keys);
     }
 
     /* Call the command. */
