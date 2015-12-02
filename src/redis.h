@@ -183,7 +183,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define REDIS_SET 2
 #define REDIS_ZSET 3
 #define REDIS_HASH 4
-#define REDIS_REF 5
+#define REDIS_REF 5 /* REDIS_REF totally equals to REDIS_STRING, but just a hint for reference */
 
 /* Objects encoding. Some kind of objects like Strings and Hashes can be
  * internally represented in multiple ways. The 'encoding' field of the object

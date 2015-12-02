@@ -612,9 +612,10 @@ off_t rdbSavedObjectLen(robj *o) {
 int rdbSaveKeyValuePair(rio *rdb, robj *key, robj *val,
                         long long expiretime, long long now)
 {
-    /* if this key's == REDIS_REF, skip it, redis will restore it from db->refed_keys*/
+    /* if REDIS_REF type, skip it, redis will restore it from db->refed_keys*/
     if (val->type == REDIS_REF)
         return 0;
+
     /* Save the expire time */
     if (expiretime != -1) {
         /* If this key is already expired skip it */
@@ -630,16 +631,10 @@ int rdbSaveKeyValuePair(rio *rdb, robj *key, robj *val,
     return 1;
 }
 
-int rdbSaveRefedKeyValuePair(rio *rdb, robj *key, robj *val,
-                        long long expiretime, long long now)
+int rdbSaveRefKeyValuePair(rio *rdb, robj *key, robj *val)
 {
-    /* Save the expire time */
-    if (expiretime != -1) {
-        /* If this key is already expired skip it */
-        if (expiretime < now) return 0;
-        if (rdbSaveType(rdb,REDIS_RDB_OPCODE_EXPIRETIME_MS) == -1) return -1;
-        if (rdbSaveMillisecondTime(rdb,expiretime) == -1) return -1;
-    }
+    /* Save opcode type */
+    if (rdbSaveType(rdb,REDIS_RDB_OPCODE_REF) == -1) return -1;
 
     /* Save type, key, value */
     /* Duplicated save same key in rdb, in rdb restore, the second key MUST be the referenced data */
@@ -690,15 +685,12 @@ int rdbSaveRio(rio *rdb, int *error) {
 
             initStaticStringObject(key,keystr);
             expire = getExpire(db,&key);
-            if ((saved=rdbSaveKeyValuePair(rdb,&key,o,expire,now)) == -1) goto werr;
+            if ((saved = rdbSaveKeyValuePair(rdb,&key,o,expire,now)) == -1) goto werr;
 
             /* save referenced key data */
-            if (!saved)
-                continue;
-            refed_set = lookupRefKey(db, &key);
-            if (!refed_set)
-                 continue;
-            if (rdbSaveRefedKeyValuePair(rdb,&key,refed_set,expire,now) == -1) goto werr;
+            if (!saved) continue;
+            if ((refed_set = lookupRefKey(db,&key)) == NULL) continue;
+            if (rdbSaveRefKeyValuePair(rdb,&key,refed_set) == -1) goto werr;
         }
         dictReleaseIterator(di);
     }
@@ -1191,7 +1183,7 @@ int rdbLoad(char *filename) {
     while(1) {
         robj *key, *val, *set_ele;
         setTypeIterator *si;
-
+        int isref = 0;
         expiretime = -1;
 
         /* Read type. */
@@ -1208,6 +1200,9 @@ int rdbLoad(char *filename) {
              * version 3. */
             if ((expiretime = rdbLoadMillisecondTime(&rdb)) == -1) goto eoferr;
             /* We read the time so we need to read the object type again. */
+            if ((type = rdbLoadType(&rdb)) == -1) goto eoferr;
+        } else if (type == REDIS_RDB_OPCODE_REF) {
+            isref = 1;
             if ((type = rdbLoadType(&rdb)) == -1) goto eoferr;
         }
 
@@ -1242,12 +1237,12 @@ int rdbLoad(char *filename) {
         /* Add the new object in the hash table .
          * Check this key is referenced data or not
          * */
-        if (!lookupKeyWrite(db, key)) {
+        if (!isref) {
             dbAdd(db,key,val);
             /* Set the expire time if needed */
             if (expiretime != -1) setExpire(db,key,expiretime);
-        } else {
-            /* this is referenced data */
+        } else if (lookupKey(db,key)){
+            /* this is referenced data, and referenced object has been loaded to db->dict */
             robj *refed_val = dupStringObject(key);
             refed_val->type = REDIS_REF;
             redisAssert(val->type==REDIS_SET);
@@ -1255,9 +1250,10 @@ int rdbLoad(char *filename) {
 
             si = setTypeInitIterator(val);
             while((set_ele = setTypeNextObject(si)) != NULL) {
-                redisAssert(set_ele->type == REDIS_STRING);
+                robj *refkey = getDecodedObject(set_ele);
                 incrRefCount(refed_val);
-                dbAdd(db,set_ele,refed_val);
+                dbAdd(db,refkey,refed_val);
+                decrRefCount(refkey);
                 decrRefCount(set_ele);
             }
             setTypeReleaseIterator(si);
