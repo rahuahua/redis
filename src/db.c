@@ -725,6 +725,7 @@ void typeCommand(redisClient *c) {
     } else {
         switch(o->type) {
         case REDIS_STRING: type = "string"; break;
+        case REDIS_REF: type = "reference"; break;
         case REDIS_LIST: type = "list"; break;
         case REDIS_SET: type = "set"; break;
         case REDIS_ZSET: type = "zset"; break;

@@ -479,7 +479,7 @@ int rdbLoadObjectType(rio *rdb) {
 int rdbSaveObject(rio *rdb, robj *o) {
     int n, nwritten = 0;
 
-    if (o->type == REDIS_STRING || o->type == REDIS_REF) {
+    if (o->type == REDIS_STRING) {
         /* Save a string value */
         if ((n = rdbSaveStringObject(rdb,o)) == -1) return -1;
         nwritten += n;
