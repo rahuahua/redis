@@ -1087,16 +1087,14 @@ int rewriteAppendOnlyFile(char *filename) {
                 if (rioWriteBulkObject(&aof, o) == 0) goto werr;
 
                 if ((refobjs = getRefKeys(db,&key,&keynum)) != NULL) {
-                    robj *refo = dupStringObject(&key);
                     for(unsigned long i = 0; i < keynum; i++) {
                         char cmd[] = "*3\r\n$6\r\nSETREF\r\n";
                         if (rioWrite(&aof, cmd, sizeof(cmd) - 1) == 0) goto werr;
                         /* Key and value */
                         if (rioWriteBulkObject(&aof,refobjs[i]) == 0) goto werr;
-                        if (rioWriteBulkObject(&aof,refo) == 0) goto werr;
+                        if (rioWriteBulkObject(&aof,&key) == 0) goto werr;
                         decrRefCount(refobjs[i]);
                     }
-                    decrRefCount(refo);
                 }
             } else if (o->type == REDIS_LIST) {
                 if (rewriteListObject(&aof,&key,o) == 0) goto werr;
