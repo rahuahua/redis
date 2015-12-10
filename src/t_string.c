@@ -221,7 +221,7 @@ int getGenericCommand(redisClient *c) {
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.nullbulk)) == NULL)
         return REDIS_OK;
 
-    if (o->type != REDIS_STRING) {
+    if (o->type != REDIS_STRING && o->type != REDIS_REF) {
         addReply(c,shared.wrongtypeerr);
         return REDIS_ERR;
     } else {

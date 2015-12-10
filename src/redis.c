@@ -287,6 +287,7 @@ struct redisCommand redisCommandTable[] = {
     {"pfdebug",pfdebugCommand,-3,"w",0,NULL,0,0,0,0,0},
     {"latency",latencyCommand,-2,"arslt",0,NULL,0,0,0,0,0},
     {"setref",setrefCommand,3,"wm",0,NULL,1,1,1,0,0},
+    {"getref",getCommand,2,"rF",0,NULL,1,1,1,0,0},
     {"delref",delrefCommand,2,"wm",0,NULL,1,1,1,0,0},
 };
 
@@ -2060,6 +2061,7 @@ void call(redisClient *c, int flags) {
         replicationFeedMonitors(c,server.monitors,c->db->id,c->argv,c->argc);
     }
 
+    /* replace reference key with referenced key here */
     if (c->cmd->flags & REDIS_CMD_CHECKREF) {
         /* replace referenced key */
         int *keys, numkeys;
