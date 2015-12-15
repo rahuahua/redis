@@ -27,4 +27,22 @@ start_server {tags {"reference"}} {
         r del x
         r get y
     } {}
+
+    test {DELREF against a reference key} {
+        r set x value_x
+        r setref y x
+        r delref y
+    } {1}
+
+    test {GET a deleted reference item} {
+       r get y
+    } {}
+
+    test {GETREF a deleted reference item} {
+        r getref y
+    } {}
+
+    test {GET a item} {
+        r get x
+    } {value_x}
 }

@@ -191,9 +191,9 @@ void delrefCommand(redisClient *c) {
         return;
     }
 
+    dbRemoveOneRefKey(c->db,c->argv[1],refo);
     dbDelete(c->db,c->argv[1]);
     server.dirty++;
-    dbRemoveOneRefKey(c->db,c->argv[1],refo);
 
     notifyKeyspaceEvent(REDIS_NOTIFY_STRING,"delref",c->argv[1],c->db->id);
 
@@ -232,6 +232,21 @@ int getGenericCommand(redisClient *c) {
 
 void getCommand(redisClient *c) {
     getGenericCommand(c);
+}
+
+void getrefCommand(redisClient *c) {
+    robj *o;
+
+    if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.nullbulk)) == NULL)
+        return;
+
+    if (o->type != REDIS_REF) {
+        addReply(c,shared.wrongtypeerr);
+        return;
+    } else {
+        addReplyBulk(c,o);
+        return;
+    }
 }
 
 void getsetCommand(redisClient *c) {

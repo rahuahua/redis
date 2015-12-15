@@ -1565,6 +1565,7 @@ void pfmergeCommand(redisClient *c);
 void pfdebugCommand(redisClient *c);
 void latencyCommand(redisClient *c);
 void setrefCommand(redisClient *c);
+void getrefCommand(redisClient *c);
 void delrefCommand(redisClient *c);
 
 #if defined(__GNUC__)

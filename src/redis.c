@@ -287,7 +287,7 @@ struct redisCommand redisCommandTable[] = {
     {"pfdebug",pfdebugCommand,-3,"w",0,NULL,0,0,0,0,0},
     {"latency",latencyCommand,-2,"arslt",0,NULL,0,0,0,0,0},
     {"setref",setrefCommand,3,"wm",0,NULL,1,1,1,0,0},
-    {"getref",getCommand,2,"rF",0,NULL,1,1,1,0,0},
+    {"getref",getrefCommand,2,"rF",0,NULL,1,1,1,0,0},
     {"delref",delrefCommand,2,"wm",0,NULL,1,1,1,0,0},
 };
 
