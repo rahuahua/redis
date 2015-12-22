@@ -327,6 +327,26 @@ robj **getRefKeys(redisDb *db, robj *ref_key, unsigned long *num) {
     return res;
 }
 
+void storeRefKeys(redisDb *db, robj *ref_key, robj *refset) {
+    setTypeIterator *si;
+    robj *set_ele, *refo = dupStringObject(ref_key);
+
+    redisAssertWithInfo(NULL, refset, refset->type == REDIS_SET);
+    refo->type = REDIS_REF;
+
+    si = setTypeInitIterator(refset);
+    while ((set_ele=setTypeNextObject(si)) != NULL) {
+        robj *raw = getDecodedObject(set_ele);
+        dbAddRefKey(db,raw,ref_key);
+        setKey(db,raw,refo);
+        incrRefCount(refo);
+        decrRefCount(set_ele);
+        decrRefCount(raw);
+    }
+    setTypeReleaseIterator(si);
+    decrRefCount(refo);
+}
+
 /*-----------------------------------------------------------------------------
  * Hooks for key space changes.
  *
@@ -820,7 +840,7 @@ void renamenxCommand(redisClient *c) {
 }
 
 void moveCommand(redisClient *c) {
-    robj *o;
+    robj *o, *refo;
     redisDb *src, *dst;
     int srcid;
     long long dbid, expire;
@@ -867,6 +887,10 @@ void moveCommand(redisClient *c) {
     dbAdd(dst,c->argv[1],o);
     if (expire != -1) setExpire(dst,c->argv[1],expire);
     incrRefCount(o);
+
+    if ((refo = lookupRefKey(c->db,c->argv[1])) != NULL) {
+        storeRefKeys(dst,c->argv[1],refo);
+    }
 
     /* OK! key moved, free the entry in the source DB */
     dbDelete(src,c->argv[1]);

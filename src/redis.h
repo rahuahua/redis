@@ -1151,6 +1151,7 @@ robj *createZiplistObject(void);
 robj *createSetObject(void);
 robj *createIntsetObject(void);
 robj *createHashObject(void);
+robj *createRawHashObject(void);
 robj *createZsetObject(void);
 robj *createZsetZiplistObject(void);
 int getLongFromObjectOrReply(redisClient *c, robj *o, long *target, const char *msg);
@@ -1365,6 +1366,7 @@ void dbAddRefKey(redisDb *db, robj *key, robj *refed_key);
 void dbRemoveOneRefKey(redisDb *db, robj *key, robj *refed_key);
 void removeRefKeyIfNeed(redisDb *db, robj *refed_key);
 robj **getRefKeys(redisDb *db, robj *ref_key, unsigned long *num);
+void storeRefKeys(redisDb *db, robj *ref_key, robj *refset);
 
 /* API to get key arguments from commands */
 int *getKeysFromCommand(struct redisCommand *cmd, robj **argv, int argc, int *numkeys);

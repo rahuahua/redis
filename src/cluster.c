@@ -4316,6 +4316,8 @@ void createDumpPayload(rio *payload, robj *o) {
      * byte followed by the serialized object. This is understood by RESTORE. */
     rioInitWithBuffer(payload,sdsempty());
     redisAssert(rdbSaveObjectType(payload,o));
+    if (o->type == REDIS_REF)
+        o->type = REDIS_HASH;
     redisAssert(rdbSaveObject(payload,o));
 
     /* Write the footer, this is how it looks like:
@@ -4364,7 +4366,7 @@ int verifyDumpPayload(unsigned char *p, size_t len) {
  * DUMP is actually not used by Redis Cluster but it is the obvious
  * complement of RESTORE and can be useful for different applications. */
 void dumpCommand(redisClient *c) {
-    robj *o, *dumpobj;
+    robj *o, *dumpobj, *refo;
     rio payload;
 
     /* Check if the key is here. */
@@ -4374,7 +4376,25 @@ void dumpCommand(redisClient *c) {
     }
 
     /* Create the DUMP encoded representation. */
-    createDumpPayload(&payload,o);
+    if((refo = lookupRefKey(c->db,c->argv[1])) != NULL) {
+        robj *hash = createRawHashObject();
+        robj *refkey = createStringObject("ref", 3);
+        robj *rawkey = createStringObject("raw", 3);
+        rio _payload;
+        createDumpPayload(&_payload,refo);
+        dumpobj = createObject(REDIS_STRING,_payload.io.buffer.ptr);
+        hashTypeSet(hash,refkey,dumpobj);
+        hashTypeSet(hash,rawkey,o);
+        /* just a hint */
+        hash->type = REDIS_REF;
+        createDumpPayload(&payload,hash);
+        decrRefCount(dumpobj);
+        decrRefCount(refkey);
+        decrRefCount(rawkey);
+        decrRefCount(hash);
+    } else {
+        createDumpPayload(&payload,o);
+    }
 
     /* Transfer to the client */
     dumpobj = createObject(REDIS_STRING,payload.io.buffer.ptr);
@@ -4433,7 +4453,38 @@ void restoreCommand(redisClient *c) {
     if (replace) dbDelete(c->db,c->argv[1]);
 
     /* Create the key and set the TTL if any */
-    dbAdd(c->db,c->argv[1],obj);
+    if (type == REDIS_RDB_TYPE_REF) {
+        robj *refkey = createStringObject("ref", 3);
+        robj *rawkey = createStringObject("raw", 3);
+        robj *refo = hashTypeGetObject(obj,refkey);
+        robj *rawo = hashTypeGetObject(obj,rawkey);
+        setTypeIterator *si;
+        robj *set_ele, *enco = tryObjectEncoding(dupStringObject(c->argv[1]));
+        rio _payload;
+
+        rioInitWithBuffer(&_payload,refo->ptr);
+        type = rdbLoadObjectType(&_payload);
+        decrRefCount(refo);
+        refo = rdbLoadObject(type,&_payload);
+        si = setTypeInitIterator(refo);
+
+        dbAdd(c->db,c->argv[1],rawo);
+        while((set_ele = setTypeNextObject(si)) != NULL) {
+            robj *ele_raw_key = getDecodedObject(set_ele);
+            dbAddRefKey(c->db,ele_raw_key,c->argv[1]);
+            dbAdd(c->db,ele_raw_key,enco);
+            incrRefCount(enco);
+            decrRefCount(set_ele);
+            decrRefCount(ele_raw_key);
+        }
+        setTypeReleaseIterator(si);
+        decrRefCount(enco);
+        decrRefCount(refkey);
+        decrRefCount(rawkey);
+        decrRefCount(obj);
+    } else {
+        dbAdd(c->db,c->argv[1],obj);
+    }
     if (ttl) setExpire(c->db,c->argv[1],mstime()+ttl);
     signalModifiedKey(c->db,c->argv[1]);
     addReply(c,shared.ok);

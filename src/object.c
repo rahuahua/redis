@@ -216,6 +216,13 @@ robj *createHashObject(void) {
     return o;
 }
 
+robj *createRawHashObject(void) {
+    dict *d = dictCreate(&hashDictType, NULL);
+    robj *o = createObject(REDIS_HASH, d);
+    o->encoding = REDIS_ENCODING_HT;
+    return o;
+}
+
 robj *createZsetObject(void) {
     zset *zs = zmalloc(sizeof(*zs));
     robj *o;
