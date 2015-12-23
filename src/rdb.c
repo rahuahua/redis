@@ -481,7 +481,7 @@ int rdbLoadObjectType(rio *rdb) {
 int rdbSaveObject(rio *rdb, robj *o) {
     int n, nwritten = 0;
 
-    if (o->type == REDIS_STRING || o->type == REDIS_REF) {
+    if (o->type == REDIS_STRING) {
         /* Save a string value */
         if ((n = rdbSaveStringObject(rdb, o)) == -1) return -1;
         nwritten += n;
@@ -561,7 +561,7 @@ int rdbSaveObject(rio *rdb, robj *o) {
         } else {
             redisPanic("Unknown sorted set encoding");
         }
-    } else if (o->type == REDIS_HASH) {
+    } else if (o->type == REDIS_HASH || o->type == REDIS_REF) {
         /* Save a hash value */
         if (o->encoding == REDIS_ENCODING_ZIPLIST) {
             size_t l = ziplistBlobLen((unsigned char*)o->ptr);

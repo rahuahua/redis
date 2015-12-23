@@ -4316,8 +4316,6 @@ void createDumpPayload(rio *payload, robj *o) {
      * byte followed by the serialized object. This is understood by RESTORE. */
     rioInitWithBuffer(payload,sdsempty());
     redisAssert(rdbSaveObjectType(payload,o));
-    if (o->type == REDIS_REF)
-        o->type = REDIS_HASH;
     redisAssert(rdbSaveObject(payload,o));
 
     /* Write the footer, this is how it looks like:
@@ -4469,6 +4467,7 @@ void restoreCommand(redisClient *c) {
         si = setTypeInitIterator(refo);
 
         dbAdd(c->db,c->argv[1],rawo);
+        enco->type = REDIS_REF;
         while((set_ele = setTypeNextObject(si)) != NULL) {
             robj *ele_raw_key = getDecodedObject(set_ele);
             dbAddRefKey(c->db,ele_raw_key,c->argv[1]);
